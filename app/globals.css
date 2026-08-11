@@ -1,0 +1,434 @@
+/*
+  Registered so it can be transitioned — chrome opacities are composed as
+  `calc(<scroll-driven value> * var(--dim))`, letting a panel fade the whole
+  chrome out without fighting the per-frame scroll writes.
+*/
+@property --dim {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
+:root {
+  /* grid */
+  --margin: 20px;
+  --gutter: 20px;
+  --cols: 12;
+
+  /* type */
+  --type-display: 44px;
+  --type-secondary: 26px;
+  --type-body: 18px;
+
+  /* rhythm */
+  --peek: 88vh; /* where the first image starts — a sliver peeks from the bottom */
+  --work-gap: 6vh;
+
+  --paper: #ffffff;
+  --ink: #000000;
+}
+
+@media (max-width: 700px) {
+  :root {
+    --margin: 16px;
+    --gutter: 12px;
+    --type-display: 30px;
+    --type-secondary: 18px;
+    --type-body: 14px;
+    --peek: 84vh;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  /* keeps the gutter reserved so locking scroll never shifts the fixed chrome */
+  scrollbar-gutter: stable;
+  /*
+    Painting the paper on <html> stops <body>'s background propagating to the
+    canvas, so <body> keeps a real painted backdrop for `mix-blend-mode` to
+    composite against. Without it the difference blend has nothing to invert
+    and the white chrome stays white on white.
+  */
+  background: var(--paper);
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--paper);
+  min-height: 100dvh;
+  color: var(--ink);
+  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+  font-weight: 400;
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+  --dim: 1;
+  transition: --dim 260ms ease;
+}
+
+body[data-panel="open"] {
+  --dim: 0;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------- grid --- */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(var(--cols), 1fr);
+  column-gap: var(--gutter);
+  padding-inline: var(--margin);
+}
+
+/* -------------------------------------------------------------- column --- */
+
+/*
+  Height is set from JS to one cycle plus one viewport; `clip` keeps the tail of
+  the duplicate column out of scrollHeight, so Lenis's wrap point lands exactly
+  on the cycle boundary.
+
+  `position: relative` makes this the containing block for the chrome, which
+  lives inside precisely so its scroll-following transform is clipped too —
+  otherwise the translated boxes count towards scrollable overflow and the
+  document height (and so the wrap point) drifts as you scroll.
+
+  Neither `relative` (z-index auto) nor `clip` creates a stacking context, so
+  the difference blend still resolves against the page.
+*/
+main {
+  display: block;
+  position: relative;
+  overflow: clip;
+}
+
+/*
+  The column is rendered as N identical cycles of [gap + works]. Scroll is
+  teleported by exactly one cycle height at the boundaries, so the content lines
+  up and the loop is invisible. Each cycle must be structurally identical for
+  that to hold — don't special-case the first or last one.
+*/
+.works {
+  row-gap: 0;
+}
+
+.works__gap {
+  grid-column: 1 / -1;
+  height: var(--peek);
+}
+
+.work {
+  margin: 0 0 var(--work-gap);
+  grid-column: 2 / span 10;
+}
+
+@media (max-width: 700px) {
+  .work {
+    grid-column: 1 / -1;
+  }
+}
+
+.work img,
+.work video {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+  background: #eceae6;
+}
+
+/* ------------------------------------------------------------ chrome ----- */
+/*
+  Chrome is absolutely positioned at the document origin and translated to the
+  viewport every scroll frame, rather than using `position: fixed`.
+
+  This is load-bearing: Chromium composites fixed-position subtrees into their
+  own layer and then skips `mix-blend-mode` entirely — the difference blend
+  silently no-ops and white chrome stays white on white paper. Absolutely
+  positioned elements stay in the root stacking context, so they blend against
+  the paper and the imagery as intended.
+
+  Because the offset lives in JS, every chrome layer is hidden until the first
+  measurement lands (see [data-ready]).
+*/
+
+.chrome {
+  position: absolute;
+  top: 0;
+  left: var(--margin);
+  right: var(--margin);
+  pointer-events: none;
+}
+
+.chrome--top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  font-size: var(--type-secondary);
+  font-weight: 400;
+}
+
+.chrome--bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+[data-ready="false"] {
+  visibility: hidden;
+}
+
+.blend {
+  color: #fff;
+  mix-blend-mode: difference;
+}
+
+/* split name ------------------------------------------------------------- */
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+}
+
+.name {
+  display: inline-block;
+  font-size: var(--type-secondary);
+  line-height: 1.1;
+  transform-origin: 0 0;
+  white-space: nowrap;
+  opacity: var(--dim);
+}
+
+/*
+  Never painted — it only holds the en dash's advance width in the flow, which
+  is what separates the two words when the wordmark is centred. The visible mark
+  in that gap is .rule, drawn to the glyph's ink box.
+*/
+.name--dash {
+  visibility: hidden;
+}
+
+/*
+  A 1×1 bar scaled to size each frame: at rest it matches the en dash exactly,
+  and it stretches and thins into the line joining the two corners.
+*/
+.rule {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  background: #fff;
+  transform-origin: 0 0;
+  transform: scale(0, 1);
+  opacity: var(--dim);
+}
+
+/* centred title ---------------------------------------------------------- */
+
+.centre {
+  position: absolute;
+  top: 0;
+  left: var(--margin);
+  right: var(--margin);
+  text-align: center;
+  pointer-events: none;
+}
+
+/*
+  The stack is exactly one 44px line tall, so the work title lands on the same
+  optical line the wordmark occupies when it is centred. The year hangs below
+  without pushing the title off centre.
+*/
+.centre__stack {
+  position: relative;
+  display: grid;
+}
+
+.centre__item {
+  grid-area: 1 / 1;
+  position: relative;
+  opacity: 0;
+  transition: opacity 200ms linear;
+}
+
+.centre__item[data-active="true"] {
+  opacity: 1;
+}
+
+.centre__title {
+  font-size: var(--type-display);
+  line-height: 1.1;
+  margin: 0;
+  font-weight: 400;
+}
+
+.centre__year {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  font-size: var(--type-body);
+  line-height: 1.2;
+  margin: 14px 0 0;
+}
+
+/* corner buttons --------------------------------------------------------- */
+
+.corner {
+  font-size: var(--type-secondary);
+  line-height: 1.1;
+  pointer-events: auto;
+  opacity: var(--dim);
+}
+
+.corner:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 4px;
+}
+
+/* ------------------------------------------------------------- popover --- */
+
+.popover {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(40px) saturate(140%);
+  -webkit-backdrop-filter: blur(40px) saturate(140%);
+  opacity: 0;
+  transition: opacity 320ms ease;
+}
+
+.popover[data-open="true"] {
+  opacity: 1;
+}
+
+.popover__inner {
+  height: 100%;
+  align-content: start;
+  padding-block: var(--margin);
+  overflow-y: auto;
+}
+
+.popover__close {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  font-size: var(--type-secondary);
+  line-height: 1.1;
+  position: sticky;
+  top: 0;
+}
+
+.popover__body {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  margin-top: 12vh;
+}
+
+/* list ------------------------------------------------------------------- */
+
+.list {
+  grid-column: 2 / span 10;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.list__item + .list__item {
+  border-top: 1px solid rgba(0, 0, 0, 0.18);
+}
+
+.list__link {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gutter);
+  width: 100%;
+  padding: 14px 0;
+  font-size: var(--type-secondary);
+  line-height: 1.2;
+  text-align: left;
+}
+
+.list__year {
+  font-size: var(--type-body);
+  opacity: 0.55;
+}
+
+/* info ------------------------------------------------------------------- */
+
+.info {
+  grid-column: 2 / span 6;
+}
+
+.info__title {
+  font-size: var(--type-secondary);
+  line-height: 1.1;
+  font-weight: 400;
+  margin: 0 0 24px;
+}
+
+.info__body p {
+  font-size: var(--type-body);
+  line-height: 1.45;
+  margin: 0 0 1.45em;
+  max-width: 62ch;
+}
+
+.info__body p:last-child {
+  margin-bottom: 0;
+}
+
+@media (max-width: 700px) {
+  .list,
+  .info {
+    grid-column: 1 / -1;
+  }
+}
+
+/* --------------------------------------------------------------- a11y --- */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .centre__item,
+  .popover {
+    transition-duration: 1ms;
+  }
+}
