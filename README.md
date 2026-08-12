@@ -33,12 +33,24 @@ come back round to the first, scroll up from the first and you land on the last.
 
 ## Three things worth knowing before editing
 
-**The chrome is absolutely positioned, not fixed.** Chromium composites
-`position: fixed` subtrees into their own layer and then skips `mix-blend-mode`
-entirely — the difference blend silently no-ops and the white chrome stays white
-on white paper. So each chrome layer sits at the document origin and carries the
-scroll offset in its own transform (`paint()` in `components/Site.tsx`). Making
-any of it `fixed` again will break the difference effect.
+**The chrome is one sticky layer — not fixed, and not scroll-following.** Two
+constraints meet here:
+
+- *Not `fixed`*: Chromium composites fixed-position subtrees into their own
+  layer and then skips `mix-blend-mode` entirely — the difference blend silently
+  no-ops and the white chrome stays white on white paper.
+- *Not a JS transform*: an earlier version faked fixed by translating the chrome
+  by `scrollY` on every scroll event. That is fine for a mouse wheel, where
+  Lenis drives scroll from JS anyway, but on touch the browser scrolls on the
+  compositor and scroll events trail it — the chrome drifted off screen during a
+  flick and snapped back.
+
+`position: sticky` satisfies both: the browser pins it, and the blend survives.
+The layer is zero-height so it takes no space in the column, everything inside
+is positioned off the viewport in `dvh`, and the blend sits on the layer so the
+group composites once. It has to stay the **first** child of `<main>` — sticky
+pins from its position in flow, so placed after the column it would only engage
+at the very bottom of the page.
 
 **The paper is painted on `<html>` as well as `<body>`.** That stops `<body>`'s
 background propagating to the canvas, which leaves `<body>` painting a real
@@ -46,11 +58,15 @@ backdrop for the blend to invert against.
 
 **The loop is Lenis's `infinite` mode, and it wraps at `scrollHeight -
 viewport`.** For that to land on a cycle boundary the column is rendered twice
-and `<main>` is clipped, from JS, to exactly one cycle plus one viewport. The
-chrome lives inside `<main>` for the same reason: its scroll-following
-transform counts towards scrollable overflow, so if it sat outside, the document
-height — and with it the wrap point — would drift as you scroll. If you move the
-chrome out, or drop the clip, the loop will slowly go out of register.
+and `<main>` is clipped, from JS, to exactly one cycle plus one viewport. Drop
+the clip and the loop goes out of register.
+
+`infinite` only wraps scroll that Lenis drives itself — the wheel. Touch
+scrolling is native, and the browser clamps it at the document end, so
+`hopSeam()` carries the loop across the boundary by hand in that case. Content
+at 0 and at the limit is identical, so the hop is invisible. `--peek` is in
+`svh` rather than `vh` or `dvh` so the cycle height cannot change when a mobile
+URL bar collapses mid-scroll, which would move the wrap point underneath you.
 
 ## Tuning
 

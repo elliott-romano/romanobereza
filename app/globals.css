@@ -21,7 +21,14 @@
   --type-body: 18px;
 
   /* rhythm */
-  --peek: 88vh; /* where the first image starts — a sliver peeks from the bottom */
+  /*
+    `svh` — the viewport at its *smallest*, with mobile browser UI showing. It
+    is a fixed number, unlike `dvh`, so the cycle height (and with it the loop's
+    wrap point) never moves when the URL bar collapses; and the first image
+    still peeks while that bar is up.
+  */
+  --peek: 88vh;
+  --peek: 88svh;
   --work-gap: 6vh;
 
   --paper: #ffffff;
@@ -36,6 +43,7 @@
     --type-secondary: 18px;
     --type-body: 14px;
     --peek: 84vh;
+    --peek: 84svh;
   }
 }
 
@@ -162,28 +170,40 @@ main {
 
 /* ------------------------------------------------------------ chrome ----- */
 /*
-  Chrome is absolutely positioned at the document origin and translated to the
-  viewport every scroll frame, rather than using `position: fixed`.
+  All chrome lives on one sticky, blended layer.
 
-  This is load-bearing: Chromium composites fixed-position subtrees into their
-  own layer and then skips `mix-blend-mode` entirely — the difference blend
-  silently no-ops and white chrome stays white on white paper. Absolutely
-  positioned elements stay in the root stacking context, so they blend against
-  the paper and the imagery as intended.
+  Sticky rather than fixed: Chromium composites fixed-position subtrees into
+  their own layer and then skips `mix-blend-mode` entirely — the difference
+  blend silently no-ops and white chrome stays white on white paper. Sticky
+  keeps the blend.
 
-  Because the offset lives in JS, every chrome layer is hidden until the first
-  measurement lands (see [data-ready]).
+  Sticky rather than a scroll-following transform: the browser pins it on the
+  compositor, so it cannot lag the way a JS-driven offset does on touch devices,
+  where scroll events trail momentum badly.
+
+  The layer is zero-height so it takes no space in the column; everything inside
+  is positioned off the viewport in dvh units. The blend sits on the layer, so
+  the whole group composites once against the page.
 */
 
 .chrome {
-  position: absolute;
+  position: sticky;
   top: 0;
-  left: var(--margin);
-  right: var(--margin);
+  height: 0;
+  color: #fff;
+  mix-blend-mode: difference;
+  opacity: var(--dim);
   pointer-events: none;
 }
 
-.chrome--top {
+.chrome > * {
+  position: absolute;
+  left: var(--margin);
+  right: var(--margin);
+}
+
+.chrome__top {
+  top: var(--margin);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -192,19 +212,17 @@ main {
   font-weight: 400;
 }
 
-.chrome--bottom {
+.chrome__bottom {
+  top: calc(100dvh - var(--margin));
+  transform: translateY(-100%);
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 
+/* hidden until the first measurement places the wordmark in the centre */
 [data-ready="false"] {
   visibility: hidden;
-}
-
-.blend {
-  color: #fff;
-  mix-blend-mode: difference;
 }
 
 /* split name ------------------------------------------------------------- */
@@ -220,7 +238,6 @@ main {
   line-height: 1.1;
   transform-origin: 0 0;
   white-space: nowrap;
-  opacity: var(--dim);
 }
 
 /*
@@ -237,26 +254,23 @@ main {
   and it stretches and thins into the line joining the two corners.
 */
 .rule {
-  position: absolute;
   top: 0;
-  left: 0;
+  /* geometry comes entirely from the transform — see paint() */
+  left: 0 !important;
+  right: auto !important;
   width: 1px;
   height: 1px;
   background: #fff;
   transform-origin: 0 0;
   transform: scale(0, 1);
-  opacity: var(--dim);
 }
 
 /* centred title ---------------------------------------------------------- */
 
 .centre {
-  position: absolute;
-  top: 0;
-  left: var(--margin);
-  right: var(--margin);
+  top: 50dvh;
+  transform: translateY(-50%);
   text-align: center;
-  pointer-events: none;
 }
 
 /*
@@ -303,7 +317,6 @@ main {
   font-size: var(--type-secondary);
   line-height: 1.1;
   pointer-events: auto;
-  opacity: var(--dim);
 }
 
 .corner:focus-visible {

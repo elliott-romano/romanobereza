@@ -81,10 +81,6 @@ export default function Site() {
   const dashRef = useRef<HTMLSpanElement>(null);
   const berezaRef = useRef<HTMLSpanElement>(null);
   const ruleRef = useRef<HTMLSpanElement>(null);
-  const topRef = useRef<HTMLHeadingElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLButtonElement>(null);
-  const infoRef = useRef<HTMLButtonElement>(null);
   const centreRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLElement>(null);
   const worksRef = useRef<HTMLDivElement>(null);
@@ -93,7 +89,6 @@ export default function Site() {
   /* layout constants, recomputed on resize — never read during a scroll frame */
   const metrics = useRef({
     scale: 1,
-    margin: 20,
     /* per-part offsets from the corner rest state to the centred wordmark */
     dx: [0, 0, 0],
     dy: [0, 0, 0],
@@ -101,44 +96,43 @@ export default function Site() {
     restTop: [0, 0, 0],
     widths: [0, 0, 0],
     dash: { left: 0, width: 0, centre: 0, weight: 1 },
-    /* viewport-relative rest offsets for each chrome layer */
-    centreOffset: 0,
-    bottomOffset: 0,
     tops: [] as number[],
     split: 1,
-    /** height of one cycle — the exact distance scroll is teleported by */
+    /** height of one cycle — the distance Lenis wraps scroll by */
     loop: 0,
   });
 
   const activeRef = useRef<number | null>(null);
-  const scrollRef = useRef(0);
+  const lenisRef = useRef(lenis);
+  lenisRef.current = lenis;
   const [active, setActive] = useState<number | null>(null);
   const [ready, setReady] = useState(false);
   const [panel, setPanel] = useState<Panel>(null);
 
   /* ---------------------------------------------------------------- paint */
 
-  const paint = useCallback((scrollY: number, progress: number) => {
+  /*
+    Only the split animates here. The chrome is pinned by CSS sticky, so nothing
+    in this function has to keep pace with the scroll position — which is what
+    makes it safe on touch, where scroll events trail the compositor.
+  */
+  const paint = useCallback((progress: number) => {
     const m = metrics.current;
-    const { scale, margin, dx, dy, centreOffset, bottomOffset } = m;
+    const { scale, dx, dy } = m;
     const parts = [romanoRef.current, dashRef.current, berezaRef.current];
     const rest = 1 - progress;
     const s = 1 + (scale - 1) * rest;
 
-    /* every layer carries the scroll offset itself — see the note in globals.css */
-    const top = scrollY + margin;
-
     for (let i = 0; i < parts.length; i++) {
       const el = parts[i];
       if (!el) continue;
-      el.style.transform = `translate(${dx[i] * rest}px, ${top + dy[i] * rest}px) scale(${s})`;
+      el.style.transform = `translate(${dx[i] * rest}px, ${dy[i] * rest}px) scale(${s})`;
     }
 
     /*
       The rule is the en dash. At rest it is drawn to the glyph's exact ink box;
       as the wordmark parts it stretches across the gap and thins to a hairline,
       so there is never a handoff between two marks.
-      Opacity composes with --dim, which drops to 0 while a panel is open.
     */
     if (ruleRef.current) {
       const romanoRight = m.restLeft[0] + dx[0] * rest + m.widths[0] * s;
@@ -153,18 +147,12 @@ export default function Site() {
       const y = m.restTop[1] + dy[1] * rest + m.dash.centre * s - weight / 2;
 
       ruleRef.current.style.transform =
-        `translate(${x}px, ${scrollY + y}px) scale(${Math.max(0, end - x)}, ${weight})`;
+        `translate(${x}px, ${y}px) scale(${Math.max(0, end - x)}, ${weight})`;
     }
 
     if (centreRef.current) {
-      const c = smoothstep(0.55, 1, progress);
-      centreRef.current.style.transform = `translateY(${scrollY + centreOffset}px)`;
-      centreRef.current.style.opacity = `calc(${c} * var(--dim))`;
+      centreRef.current.style.opacity = String(smoothstep(0.55, 1, progress));
     }
-
-    const bottom = `translateY(${scrollY + bottomOffset}px)`;
-    if (listRef.current) listRef.current.style.transform = bottom;
-    if (infoRef.current) infoRef.current.style.transform = bottom;
   }, []);
 
   /* -------------------------------------------------------------- measure */
@@ -173,8 +161,7 @@ export default function Site() {
     const romano = romanoRef.current;
     const dash = dashRef.current;
     const bereza = berezaRef.current;
-    const row = topRef.current;
-    if (!romano || !dash || !bereza || !row) return;
+    if (!romano || !dash || !bereza) return;
 
     const parts = [romano, dash, bereza];
 
@@ -183,13 +170,12 @@ export default function Site() {
     parts.forEach((el) => {
       el.style.transform = "none";
     });
-    const rowTop = row.getBoundingClientRect().top;
+    /* the sticky layer is pinned to the viewport, so these are stable */
     const rects = parts.map((el) => el.getBoundingClientRect());
 
     const rootStyles = getComputedStyle(document.documentElement);
     const display = readPx(rootStyles, "--type-display", 44);
     const secondary = readPx(rootStyles, "--type-secondary", 26);
-    const margin = readPx(rootStyles, "--margin", 20);
     const scale = display / secondary;
 
     const vw = document.documentElement.clientWidth;
@@ -204,27 +190,17 @@ export default function Site() {
     ];
     const centred = vh / 2 - (rects[0].height * scale) / 2;
 
-    /* rest offsets are measured within the row, so they survive any scroll pos */
-    const restTop = rects.map((rect) => margin + (rect.top - rowTop));
-
     metrics.current.scale = scale;
-    metrics.current.margin = margin;
     metrics.current.dx = lefts.map((left, i) => left - rects[i].left);
-    metrics.current.dy = restTop.map((top) => centred - top);
+    metrics.current.dy = rects.map((rect) => centred - rect.top);
     metrics.current.restLeft = rects.map((rect) => rect.left);
-    metrics.current.restTop = restTop;
+    metrics.current.restTop = rects.map((rect) => rect.top);
     metrics.current.widths = rects.map((rect) => rect.width);
     metrics.current.dash = measureDash(dash, rects[1].width, rects[1].height);
 
     parts.forEach((el, i) => {
       el.style.transform = previous[i];
     });
-
-    /* the centre stack is one 44px line tall — sit that line on the middle */
-    metrics.current.centreOffset =
-      vh / 2 - (centreRef.current?.offsetHeight ?? 0) / 2;
-    metrics.current.bottomOffset =
-      vh - margin - (bottomRef.current?.offsetHeight ?? 0);
 
     /* document offsets of every image, so scroll frames stay read-free */
     const scrollY = window.scrollY;
@@ -252,10 +228,35 @@ export default function Site() {
 
   /* --------------------------------------------------------------- update */
 
+  /**
+   * Carry the loop across the seam when the browser is doing the scrolling.
+   *
+   * Lenis only wraps scroll it drives itself (the wheel). Touch scrolling is
+   * native, and the browser clamps it at the document end — so without this the
+   * column dead-ends on a phone. Content at 0 and at the limit is identical, so
+   * the hop is invisible.
+   */
+  const hopSeam = useCallback(() => {
+    const lenis = lenisRef.current;
+    if (metrics.current.loop <= 0) return;
+    if (lenis?.isScrolling === "smooth") return; // Lenis wraps this itself
+
+    const max = document.documentElement.scrollHeight - window.innerHeight;
+    const y = window.scrollY;
+    const heading = lenis?.direction ?? Math.sign(lenis?.velocity ?? 0);
+    if (max <= 0 || heading === 0) return;
+
+    const to = heading > 0 && y >= max - 2 ? 1 : heading < 0 && y <= 2 ? max - 1 : null;
+    if (to === null) return;
+
+    if (lenis) lenis.animatedScroll = lenis.targetScroll = to;
+    window.scrollTo({ top: to, behavior: "instant" });
+  }, []);
+
   const update = useCallback(
     (y: number) => {
       const { tops, split, loop } = metrics.current;
-      scrollRef.current = y;
+      hopSeam();
 
       /*
         Within a cycle the wordmark splits on the way in and reassembles on the
@@ -271,7 +272,7 @@ export default function Site() {
               : 1
           : y / split;
 
-      paint(y, clamp(progress, 0, 1));
+      paint(clamp(progress, 0, 1));
 
       const centre = y + window.innerHeight / 2;
       let next: number | null = null;
@@ -285,7 +286,7 @@ export default function Site() {
         setActive(next);
       }
     },
-    [paint],
+    [paint, hopSeam],
   );
 
   /* ---------------------------------------------------------------- wiring */
@@ -372,6 +373,61 @@ export default function Site() {
   return (
     <>
       <main ref={mainRef} inert={panel !== null}>
+        {/* one sticky, blended layer — see the note in globals.css */}
+        <div className="chrome" data-ready={ready}>
+          <h1 className="chrome__top">
+            <span className="wordmark">
+              <span className="name" ref={romanoRef}>
+                Romano
+              </span>
+              <span className="name name--dash" ref={dashRef} aria-hidden="true">
+                –
+              </span>
+            </span>
+            <span className="name" ref={berezaRef}>
+              Bereza
+            </span>
+          </h1>
+
+          <span className="rule" ref={ruleRef} aria-hidden="true" />
+
+          <div className="centre" ref={centreRef} aria-hidden="true">
+            <div className="centre__stack">
+              {WORKS.map((work, i) => (
+                <div
+                  className="centre__item"
+                  key={work.slug}
+                  data-active={active === i}
+                >
+                  <h2 className="centre__title">{work.title}</h2>
+                  <p className="centre__year">{work.year}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="chrome__bottom">
+            <button
+              type="button"
+              className="corner"
+              aria-haspopup="dialog"
+              aria-expanded={panel === "list"}
+              onClick={() => setPanel("list")}
+            >
+              List
+            </button>
+            <button
+              type="button"
+              className="corner"
+              aria-haspopup="dialog"
+              aria-expanded={panel === "info"}
+              onClick={() => setPanel("info")}
+            >
+              Info
+            </button>
+          </div>
+        </div>
+
         <div className="works grid" ref={worksRef}>
           {Array.from({ length: CYCLES }, (_, cycle) => (
             <Fragment key={cycle}>
@@ -397,63 +453,6 @@ export default function Site() {
           ))}
         </div>
 
-        {/*
-          Chrome lives inside <main> so its scroll-following transform is
-          clipped along with the column — see the note in globals.css.
-        */}
-        <h1 className="chrome chrome--top" ref={topRef} data-ready={ready}>
-          <span className="wordmark">
-            <span className="name blend" ref={romanoRef}>
-              Romano
-            </span>
-            <span className="name name--dash blend" ref={dashRef} aria-hidden="true">
-              –
-            </span>
-          </span>
-          <span className="name blend" ref={berezaRef}>
-            Bereza
-          </span>
-        </h1>
-
-        <span className="rule blend" ref={ruleRef} data-ready={ready} aria-hidden="true" />
-
-        <div className="centre blend" ref={centreRef} data-ready={ready} aria-hidden="true">
-          <div className="centre__stack">
-            {WORKS.map((work, i) => (
-              <div
-                className="centre__item"
-                key={work.slug}
-                data-active={active === i}
-              >
-                <h2 className="centre__title">{work.title}</h2>
-                <p className="centre__year">{work.year}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="chrome chrome--bottom" ref={bottomRef} data-ready={ready}>
-          <button
-            type="button"
-            className="corner blend"
-            ref={listRef}
-            aria-haspopup="dialog"
-            aria-expanded={panel === "list"}
-            onClick={() => setPanel("list")}
-          >
-            List
-          </button>
-          <button
-            type="button"
-            className="corner blend"
-            ref={infoRef}
-            aria-haspopup="dialog"
-            aria-expanded={panel === "info"}
-            onClick={() => setPanel("info")}
-          >
-            Info
-          </button>
-        </div>
       </main>
 
       <p className="visually-hidden" aria-live="polite">
